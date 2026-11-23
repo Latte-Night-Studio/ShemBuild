@@ -20,4 +20,12 @@
     <PackageReference Include="Microsoft.WindowsAppSDK" Version="1.8.250907003" />
     <PackageReference Include="HelixToolkit.WinUI.SharpDX" Version="3.1.2" />
   </ItemGroup>
+
+  <Target Name="CopyWinUIXamlAssetsToPublish" AfterTargets="Publish">
+    <ItemGroup>
+      <WinUIXamlAsset Include="$(TargetDir)*.xbf" />
+      <WinUIXamlAsset Include="$(TargetDir)$(AssemblyName).pri" Condition="Exists('$(TargetDir)$(AssemblyName).pri')" />
+    </ItemGroup>
+    <Copy SourceFiles="@(WinUIXamlAsset)" DestinationFolder="$(PublishDir)" SkipUnchangedFiles="true" />
+  </Target>
 </Project>

@@ -12,6 +12,8 @@ dotnet build .\src\ShemBuild.App\ShemBuild.App.csproj -p:Platform=x64
 
 Run the app from Visual Studio, or launch `src\ShemBuild.App\bin\x64\Debug\net10.0-windows10.0.26100.0\ShemBuild.App.exe`. The framework-dependent executable needs the .NET 10 Desktop Runtime.
 
+For early testing, download the self-contained Windows x64 ZIP from [GitHub Releases](https://github.com/Latte-Night-Studio/ShemBuild/releases). Extract the full archive and run `ShemBuild.App.exe`; the package includes the .NET and Windows App SDK runtimes.
+
 Before rendering, the app asks the user to confirm or choose a stable Minecraft release. `DataVersion` 3700 suggests 1.20.4 because that is the version associated with the current sample files; other values do not have a verified mapping, so the latest stable release is only a suggestion. If no archive is selected, the app downloads the official client JAR for the confirmed release, verifies its SHA-1 and size against Mojang metadata, and caches it under `%LOCALAPPDATA%\ShemBuild\assets`. Offline use can reuse a cached JAR for the chosen release. A manual **Choose resource archive…** override remains available for a client `.jar` or full resource-pack `.zip`; the app cannot confirm that a manually selected archive matches the chosen release.
 
 ## Prototype scope and limits
@@ -34,4 +36,4 @@ In a single C# reader probe, those files took 20–401 ms to parse and allocated
 
 The voxel preflight found 59,926–1,423,600 exposed faces. The app warns above 750,000 faces and continues rendering, up to an emergency ceiling of 2,000,000 faces. The user confirmed that textures display and, after the camera and far-plane correction, the large `PantheonINSCRIPTION` model is fully visible with the warning. Its status line reported 1,423,600 exposed faces, 5,858 ms scene construction, 889 ms UI geometry preparation, and about 1,704.5 MB allocated. Stage 0 is complete. The emergency ceiling has not been exercised on a sample. Do not add format/version combinations to a compatibility matrix until representative files have been checked.
 
-Stage 1 has since been built with .NET SDK 10.0.403 and launched. A XAML theme-resource error that prevented startup was corrected; user review of the viewer is still ongoing, so stage 1 is not marked complete.
+Stage 1 has since been built with .NET SDK 10.0.404 and launched. The self-contained alpha package opens a repository sample. User review of the viewer is still ongoing, so stage 1 is not marked complete.
