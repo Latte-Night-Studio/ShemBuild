@@ -1,0 +1,36 @@
+Microsoft Visual Studio Solution File, Format Version 12.00
+# Visual Studio Version 17
+VisualStudioVersion = 17.0.31903.59
+MinimumVisualStudioVersion = 10.0.40219.1
+Project("{9A19103F-16F7-4668-BE54-9A1E7A4F7556}") = "ShemBuild.Core", "src\ShemBuild.Core\ShemBuild.Core.csproj", "{C78E37AF-7272-4D95-9644-1359822B04DE}"
+EndProject
+Project("{9A19103F-16F7-4668-BE54-9A1E7A4F7556}") = "ShemBuild.App", "src\ShemBuild.App\ShemBuild.App.csproj", "{3B8C687B-07B1-4DD3-96C4-6B515E8BD4C6}"
+EndProject
+Project("{9A19103F-16F7-4668-BE54-9A1E7A4F7556}") = "ShemBuild.Rendering", "src\ShemBuild.Rendering\ShemBuild.Rendering.csproj", "{91B2DCB8-51C7-42CB-96FC-9C92B94D902E}"
+EndProject
+Project("{9A19103F-16F7-4668-BE54-9A1E7A4F7556}") = "ShemBuild.Resources", "src\ShemBuild.Resources\ShemBuild.Resources.csproj", "{B9423B79-F5E8-44AD-A5D9-6E5F6838CA12}"
+EndProject
+Global
+	GlobalSection(SolutionConfigurationPlatforms) = preSolution
+		Debug|x64 = Debug|x64
+		Release|x64 = Release|x64
+	EndGlobalSection
+	GlobalSection(ProjectConfigurationPlatforms) = postSolution
+		{C78E37AF-7272-4D95-9644-1359822B04DE}.Debug|x64.ActiveCfg = Debug|Any CPU
+		{C78E37AF-7272-4D95-9644-1359822B04DE}.Debug|x64.Build.0 = Debug|Any CPU
+		{C78E37AF-7272-4D95-9644-1359822B04DE}.Release|x64.ActiveCfg = Release|Any CPU
+		{C78E37AF-7272-4D95-9644-1359822B04DE}.Release|x64.Build.0 = Release|Any CPU
+		{3B8C687B-07B1-4DD3-96C4-6B515E8BD4C6}.Debug|x64.ActiveCfg = Debug|x64
+		{3B8C687B-07B1-4DD3-96C4-6B515E8BD4C6}.Debug|x64.Build.0 = Debug|x64
+		{3B8C687B-07B1-4DD3-96C4-6B515E8BD4C6}.Release|x64.ActiveCfg = Release|x64
+		{3B8C687B-07B1-4DD3-96C4-6B515E8BD4C6}.Release|x64.Build.0 = Release|x64
+		{91B2DCB8-51C7-42CB-96FC-9C92B94D902E}.Debug|x64.ActiveCfg = Debug|Any CPU
+		{91B2DCB8-51C7-42CB-96FC-9C92B94D902E}.Debug|x64.Build.0 = Debug|Any CPU
+		{91B2DCB8-51C7-42CB-96FC-9C92B94D902E}.Release|x64.ActiveCfg = Release|Any CPU
+		{91B2DCB8-51C7-42CB-96FC-9C92B94D902E}.Release|x64.Build.0 = Release|Any CPU
+		{B9423B79-F5E8-44AD-A5D9-6E5F6838CA12}.Debug|x64.ActiveCfg = Debug|Any CPU
+		{B9423B79-F5E8-44AD-A5D9-6E5F6838CA12}.Debug|x64.Build.0 = Debug|Any CPU
+		{B9423B79-F5E8-44AD-A5D9-6E5F6838CA12}.Release|x64.ActiveCfg = Release|Any CPU
+		{B9423B79-F5E8-44AD-A5D9-6E5F6838CA12}.Release|x64.Build.0 = Release|Any CPU
+	EndGlobalSection
+EndGlobal
