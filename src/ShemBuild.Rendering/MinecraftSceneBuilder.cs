@@ -132,6 +132,13 @@ public sealed class MinecraftSceneBuilder
     private ResolvedBlock ResolveBlockState(string state)
     {
         var (identifier, properties) = ParseBlockState(state);
+        if (identifier.Equals("minecraft:light", StringComparison.Ordinal))
+        {
+            // Vanilla light blocks have no visible geometry. Keep them in the schematic's
+            // block counts, but do not render a missing-model cube or let them occlude neighbors.
+            return new ResolvedBlock([], false, false);
+        }
+
         var (namespaceName, blockName) = SplitResourceLocation(identifier);
         if (!_pack!.TryReadAsset($"assets/{namespaceName}/blockstates/{blockName}.json", out var bytes))
         {
