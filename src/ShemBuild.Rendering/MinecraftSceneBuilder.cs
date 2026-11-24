@@ -43,6 +43,7 @@ public sealed class MinecraftSceneBuilder
 
         var plane = checked(schematic.Width * schematic.Length);
         var blockModels = new ResolvedBlock?[schematic.Palette.Length];
+        var blockStateHashes = schematic.Palette.Select(GetStableStateHash).ToArray();
         Span<Vector3> pointScratch = stackalloc Vector3[4];
         Span<Vector2> uvScratch = stackalloc Vector2[4];
         for (var y = 0; y < schematic.Height; y++)
@@ -71,8 +72,9 @@ public sealed class MinecraftSceneBuilder
                         y - (schematic.Height - 1) / 2f,
                         z - (schematic.Length - 1) / 2f);
 
-                    foreach (var part in block.Parts)
+                    for (var groupIndex = 0; groupIndex < block.ChoiceGroups.Count; groupIndex++)
                     {
+                        var part = ChooseModelPart(block.ChoiceGroups[groupIndex], x, y, z, blockStateHashes[paletteIndex], groupIndex);
                         foreach (var element in part.Model.Elements)
                         {
                             foreach (var face in element.Faces)
@@ -148,13 +150,13 @@ public sealed class MinecraftSceneBuilder
 
         using var document = JsonDocument.Parse(bytes);
         var root = document.RootElement;
-        var parts = new List<ModelPart>();
+        var choiceGroups = new List<ModelChoiceGroup>();
         if (root.TryGetProperty("variants", out var variants) && variants.ValueKind == JsonValueKind.Object)
         {
             var selected = ChooseVariant(variants, properties);
             if (selected is not null)
             {
-                AddApply(parts, selected.Value, namespaceName);
+                AddApply(choiceGroups, selected.Value, namespaceName);
             }
         }
 
@@ -169,14 +171,17 @@ public sealed class MinecraftSceneBuilder
 
                 if (item.TryGetProperty("apply", out var apply))
                 {
-                    AddApply(parts, apply, namespaceName);
+                    AddApply(choiceGroups, apply, namespaceName);
                 }
             }
         }
 
-        return parts.Count == 0
+        return choiceGroups.Count == 0
             ? CreateMissingBlock()
-            : new ResolvedBlock(parts, parts.Any(part => part.Model.IsFullCube), false);
+            : new ResolvedBlock(
+                choiceGroups,
+                choiceGroups.Any(group => group.Choices.All(choice => choice.Part.Model.IsFullCube)),
+                false);
     }
 
     private static JsonElement? ChooseVariant(JsonElement variants, IReadOnlyDictionary<string, string> properties)
@@ -250,20 +255,30 @@ public sealed class MinecraftSceneBuilder
         return true;
     }
 
-    private void AddApply(List<ModelPart> parts, JsonElement apply, string defaultNamespace)
+    private void AddApply(List<ModelChoiceGroup> choiceGroups, JsonElement apply, string defaultNamespace)
     {
+        var choices = new List<WeightedModelPart>();
         if (apply.ValueKind == JsonValueKind.Array)
         {
-            // Weighted alternatives are selected deterministically to keep previews stable.
-            if (apply.GetArrayLength() > 0)
+            foreach (var alternative in apply.EnumerateArray())
             {
-                AddApply(parts, apply[0], defaultNamespace);
+                AddApplyCandidate(choices, alternative, defaultNamespace);
             }
-
-            return;
+        }
+        else
+        {
+            AddApplyCandidate(choices, apply, defaultNamespace);
         }
 
-        if (apply.ValueKind != JsonValueKind.Object || !apply.TryGetProperty("model", out var modelElement))
+        if (choices.Count > 0)
+        {
+            choiceGroups.Add(new ModelChoiceGroup(choices));
+        }
+    }
+
+    private void AddApplyCandidate(List<WeightedModelPart> choices, JsonElement candidate, string defaultNamespace)
+    {
+        if (candidate.ValueKind != JsonValueKind.Object || !candidate.TryGetProperty("model", out var modelElement))
         {
             return;
         }
@@ -274,15 +289,76 @@ public sealed class MinecraftSceneBuilder
             return;
         }
 
+        var weight = 1;
+        if (candidate.TryGetProperty("weight", out var weightElement) &&
+            (!weightElement.TryGetInt32(out weight) || weight <= 0))
+        {
+            return;
+        }
+
         var model = ResolveModel(NormalizeResourceLocation(modelName, defaultNamespace), new HashSet<string>(StringComparer.Ordinal));
         if (model is null || model.Elements.Count == 0)
         {
             return;
         }
 
-        var x = apply.TryGetProperty("x", out var xElement) ? xElement.GetInt32() : 0;
-        var y = apply.TryGetProperty("y", out var yElement) ? yElement.GetInt32() : 0;
-        parts.Add(new ModelPart(model, x, y));
+        var x = candidate.TryGetProperty("x", out var xElement) ? xElement.GetInt32() : 0;
+        var y = candidate.TryGetProperty("y", out var yElement) ? yElement.GetInt32() : 0;
+        choices.Add(new WeightedModelPart(new ModelPart(model, x, y), weight));
+    }
+
+    private static ModelPart ChooseModelPart(ModelChoiceGroup group, int x, int y, int z, uint stateHash, int groupIndex)
+    {
+        if (group.Choices.Count == 1)
+        {
+            return group.Choices[0].Part;
+        }
+
+        var remainingWeight = GetModelChoiceHash(x, y, z, stateHash, groupIndex) % (ulong)group.TotalWeight;
+        foreach (var choice in group.Choices)
+        {
+            if (remainingWeight < (ulong)choice.Weight)
+            {
+                return choice.Part;
+            }
+
+            remainingWeight -= (ulong)choice.Weight;
+        }
+
+        return group.Choices[group.Choices.Count - 1].Part;
+    }
+
+    private static uint GetStableStateHash(string state)
+    {
+        unchecked
+        {
+            var hash = 2166136261u;
+            foreach (var character in state)
+            {
+                hash = (hash ^ character) * 16777619u;
+            }
+
+            return hash;
+        }
+    }
+
+    private static ulong GetModelChoiceHash(int x, int y, int z, uint stateHash, int groupIndex)
+    {
+        unchecked
+        {
+            var hash = 14695981039346656037ul;
+            hash = (hash ^ (uint)x) * 1099511628211ul;
+            hash = (hash ^ (uint)y) * 1099511628211ul;
+            hash = (hash ^ (uint)z) * 1099511628211ul;
+            hash = (hash ^ stateHash) * 1099511628211ul;
+            hash = (hash ^ (uint)groupIndex) * 1099511628211ul;
+            hash ^= hash >> 30;
+            hash *= 0xBF58476D1CE4E5B9ul;
+            hash ^= hash >> 27;
+            hash *= 0x94D049BB133111EBul;
+            hash ^= hash >> 31;
+            return hash;
+        }
     }
 
     private ResolvedModel? ResolveModel(string location, HashSet<string> visiting)
@@ -536,7 +612,10 @@ public sealed class MinecraftSceneBuilder
 
         var element = new ModelElement(Vector3.Zero, new Vector3(16), null, faces);
         var model = new ResolvedModel(new Dictionary<string, string>(), [element], true);
-        return new ResolvedBlock([new ModelPart(model, 0, 0)], true, true);
+        return new ResolvedBlock(
+            [new ModelChoiceGroup([new WeightedModelPart(new ModelPart(model, 0, 0), 1)])],
+            true,
+            true);
     }
 
     private static bool IsFullCubeElement(ModelElement element) =>
@@ -801,7 +880,12 @@ public sealed class MinecraftSceneBuilder
         data.Length > 25 && data.AsSpan(0, 8).SequenceEqual(new byte[] { 137, 80, 78, 71, 13, 10, 26, 10 });
 
     private readonly record struct MaterialKey(string? TexturePath, Vector4 Tint);
-    private sealed record ResolvedBlock(IReadOnlyList<ModelPart> Parts, bool IsFullCube, bool IsMissing);
+    private sealed record ResolvedBlock(IReadOnlyList<ModelChoiceGroup> ChoiceGroups, bool IsFullCube, bool IsMissing);
+    private sealed record ModelChoiceGroup(IReadOnlyList<WeightedModelPart> Choices)
+    {
+        public long TotalWeight { get; } = Choices.Sum(choice => (long)choice.Weight);
+    }
+    private sealed record WeightedModelPart(ModelPart Part, int Weight);
     private sealed record ModelPart(ResolvedModel Model, int XRotation, int YRotation);
     private sealed record ResolvedModel(Dictionary<string, string> Textures, IReadOnlyList<ModelElement> Elements, bool IsFullCube)
     {
