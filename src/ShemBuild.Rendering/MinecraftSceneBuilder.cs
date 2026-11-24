@@ -20,6 +20,7 @@ public sealed class MinecraftSceneBuilder
     private readonly HashSet<string> _missingTextures = new(StringComparer.Ordinal);
     private readonly HashSet<string> _statesWithMissingTextures = new(StringComparer.Ordinal);
     private readonly Dictionary<string, int> _missingBlocks = new(StringComparer.Ordinal);
+    private readonly Dictionary<string, Vector4> _blockTintCache = new(StringComparer.Ordinal);
     private MinecraftResourcePack? _pack;
     private int _faceCount;
     private int _textureBytes;
@@ -35,11 +36,14 @@ public sealed class MinecraftSceneBuilder
         _missingTextures.Clear();
         _statesWithMissingTextures.Clear();
         _missingBlocks.Clear();
+        _blockTintCache.Clear();
         _faceCount = 0;
         _textureBytes = 0;
 
         var plane = checked(schematic.Width * schematic.Length);
         var blockModels = new ResolvedBlock?[schematic.Palette.Length];
+        Span<Vector3> pointScratch = stackalloc Vector3[4];
+        Span<Vector2> uvScratch = stackalloc Vector2[4];
         for (var y = 0; y < schematic.Height; y++)
         {
             for (var z = 0; z < schematic.Length; z++)
@@ -78,9 +82,9 @@ public sealed class MinecraftSceneBuilder
                                     continue;
                                 }
 
-                                var tint = face.TintIndex.HasValue ? GetBlockTint(state) : Vector4.One;
+                                var tint = face.TintIndex.HasValue ? GetBlockTintCached(state) : Vector4.One;
                                 var material = ResolveMaterial(state, part.Model, face, tint);
-                                AddFace(material, face, element.Rotation, part.XRotation, part.YRotation, blockOrigin);
+                                AddFace(material, face, element.Rotation, part.XRotation, part.YRotation, blockOrigin, pointScratch, uvScratch);
                             }
                         }
                     }
@@ -388,30 +392,39 @@ public sealed class MinecraftSceneBuilder
             return new MaterialKey(null, MissingTint);
         }
 
-        var textureReference = face.TextureReference;
-        var visited = new HashSet<string>(StringComparer.Ordinal);
-        while (textureReference.StartsWith('#'))
+        if (!model.ResolvedTexturePaths.TryGetValue(face.TextureReference, out var texturePath))
         {
-            var key = textureReference[1..];
-            if (!visited.Add(key) || !model.Textures.TryGetValue(key, out textureReference!))
-            {
-                _statesWithMissingTextures.Add(state);
-                return new MaterialKey(null, MissingTint);
-            }
+            texturePath = ResolveTexturePath(model, face.TextureReference);
+            model.ResolvedTexturePaths[face.TextureReference] = texturePath;
         }
 
-        var (namespaceName, textureName) = SplitResourceLocation(textureReference);
-        textureName = textureName.StartsWith("textures/", StringComparison.Ordinal) ? textureName[9..] : textureName;
-        var texturePath = $"assets/{namespaceName}/textures/{textureName}.png";
-        var textureBytes = LoadTexture(texturePath);
-        if (textureBytes is null)
+        if (texturePath is null)
         {
-            _missingTextures.Add(texturePath);
             _statesWithMissingTextures.Add(state);
             return new MaterialKey(null, MissingTint);
         }
 
         return new MaterialKey(texturePath, tint);
+    }
+
+    private string? ResolveTexturePath(ResolvedModel model, string textureReference)
+    {
+        var aliasDepth = 0;
+        while (textureReference.StartsWith('#'))
+        {
+            if (aliasDepth++ >= model.Textures.Count ||
+                !model.Textures.TryGetValue(textureReference[1..], out var nextReference))
+            {
+                return null;
+            }
+
+            textureReference = nextReference;
+        }
+
+        var (namespaceName, textureName) = SplitResourceLocation(textureReference);
+        textureName = textureName.StartsWith("textures/", StringComparison.Ordinal) ? textureName[9..] : textureName;
+        var texturePath = $"assets/{namespaceName}/textures/{textureName}.png";
+        return LoadTexture(texturePath) is null ? null : texturePath;
     }
 
     private byte[]? LoadTexture(string path)
@@ -437,7 +450,15 @@ public sealed class MinecraftSceneBuilder
         return bytes;
     }
 
-    private void AddFace(MaterialKey material, ModelFace face, ElementRotation? elementRotation, int xRotation, int yRotation, Vector3 blockOrigin)
+    private void AddFace(
+        MaterialKey material,
+        ModelFace face,
+        ElementRotation? elementRotation,
+        int xRotation,
+        int yRotation,
+        Vector3 blockOrigin,
+        Span<Vector3> points,
+        Span<Vector2> uvs)
     {
         if (_faceCount >= AbsoluteFaceSafetyLimit)
         {
@@ -451,14 +472,13 @@ public sealed class MinecraftSceneBuilder
             _vertices.Add(material, vertices);
         }
 
-        var points = new Vector3[4];
         for (var i = 0; i < points.Length; i++)
         {
             var local = TransformVertex(face.Corners[i], elementRotation, xRotation, yRotation) / 16f - new Vector3(0.5f);
             points[i] = blockOrigin + local;
         }
 
-        var uvs = FaceUvs(face.Uv, face.UvRotation);
+        WriteFaceUvs(face.Uv, face.UvRotation, uvs);
         vertices.Add(new RenderVertex(points[0], uvs[0]));
         vertices.Add(new RenderVertex(points[1], uvs[1]));
         vertices.Add(new RenderVertex(points[2], uvs[2]));
@@ -514,6 +534,18 @@ public sealed class MinecraftSceneBuilder
     private static bool IsFullCubeElement(ModelElement element) =>
         element.Rotation is null && element.From.X <= 0 && element.From.Y <= 0 && element.From.Z <= 0 &&
         element.To.X >= 16 && element.To.Y >= 16 && element.To.Z >= 16;
+
+    private Vector4 GetBlockTintCached(string state)
+    {
+        if (_blockTintCache.TryGetValue(state, out var tint))
+        {
+            return tint;
+        }
+
+        tint = GetBlockTint(state);
+        _blockTintCache[state] = tint;
+        return tint;
+    }
 
     private static Vector4 GetBlockTint(string state)
     {
@@ -611,17 +643,43 @@ public sealed class MinecraftSceneBuilder
         _ => new Vector4(0, 0, 16, 16)
     };
 
-    private static Vector2[] FaceUvs(Vector4 uv, int rotation)
+    private static void WriteFaceUvs(Vector4 uv, int rotation, Span<Vector2> values)
     {
-        var values = new[]
-        {
-            new Vector2(uv.X / 16f, uv.Y / 16f),
-            new Vector2(uv.X / 16f, uv.W / 16f),
-            new Vector2(uv.Z / 16f, uv.W / 16f),
-            new Vector2(uv.Z / 16f, uv.Y / 16f)
-        };
+        values[0] = new Vector2(uv.X / 16f, uv.Y / 16f);
+        values[1] = new Vector2(uv.X / 16f, uv.W / 16f);
+        values[2] = new Vector2(uv.Z / 16f, uv.W / 16f);
+        values[3] = new Vector2(uv.Z / 16f, uv.Y / 16f);
         var steps = ((rotation % 360) + 360) % 360 / 90;
-        return steps == 0 ? values : Enumerable.Range(0, 4).Select(index => values[(index + steps) % 4]).ToArray();
+        if (steps == 0)
+        {
+            return;
+        }
+
+        var first = values[0];
+        var second = values[1];
+        var third = values[2];
+        var fourth = values[3];
+        switch (steps)
+        {
+            case 1:
+                values[0] = second;
+                values[1] = third;
+                values[2] = fourth;
+                values[3] = first;
+                break;
+            case 2:
+                values[0] = third;
+                values[1] = fourth;
+                values[2] = first;
+                values[3] = second;
+                break;
+            case 3:
+                values[0] = fourth;
+                values[1] = first;
+                values[2] = second;
+                values[3] = third;
+                break;
+        }
     }
 
     private static bool TryReadVector3(JsonElement element, out Vector3 vector)
@@ -675,7 +733,10 @@ public sealed class MinecraftSceneBuilder
     private readonly record struct MaterialKey(string? TexturePath, Vector4 Tint);
     private sealed record ResolvedBlock(IReadOnlyList<ModelPart> Parts, bool IsFullCube, bool IsMissing);
     private sealed record ModelPart(ResolvedModel Model, int XRotation, int YRotation);
-    private sealed record ResolvedModel(Dictionary<string, string> Textures, IReadOnlyList<ModelElement> Elements, bool IsFullCube);
+    private sealed record ResolvedModel(Dictionary<string, string> Textures, IReadOnlyList<ModelElement> Elements, bool IsFullCube)
+    {
+        public Dictionary<string, string?> ResolvedTexturePaths { get; } = new(StringComparer.Ordinal);
+    }
     private sealed record ModelElement(Vector3 From, Vector3 To, ElementRotation? Rotation, IReadOnlyList<ModelFace> Faces);
     private sealed record ElementRotation(Vector3 Origin, string Axis, float Angle, bool Rescale);
     private sealed record ModelFace(string Direction, Vector3[] Corners, Vector4 Uv, int UvRotation, string? CullFace, int? TintIndex, string TextureReference);
