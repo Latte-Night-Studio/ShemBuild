@@ -1,3 +1,4 @@
+using System.Buffers.Binary;
 using System.Numerics;
 using System.Text.Json;
 using ShemBuild.Core;
@@ -108,7 +109,7 @@ public sealed class MinecraftSceneBuilder
             if (material.TexturePath is not null && _textureCache.TryGetValue(material.TexturePath, out var loadedTexture))
             {
                 textureBytes = loadedTexture;
-                hasAlpha = HasAlphaChannel(loadedTexture);
+                hasAlpha = HasTransparency(loadedTexture);
             }
 
             meshes.Add(new RenderMesh(material.TexturePath, textureBytes, material.Tint, hasAlpha, vertices.ToArray()));
@@ -731,8 +732,70 @@ public sealed class MinecraftSceneBuilder
         return separator >= 0 ? (location[..separator], location[(separator + 1)..]) : (defaultNamespace, location);
     }
 
-    private static bool HasAlphaChannel(byte[] png) =>
-        png.Length > 25 && png[25] is 3 or 4 or 6;
+    private static bool HasTransparency(byte[] png)
+    {
+        if (!IsPng(png))
+        {
+            return false;
+        }
+
+        var colorType = png[25];
+        if (colorType is 4 or 6)
+        {
+            return true;
+        }
+
+        if (colorType is not (0 or 2 or 3))
+        {
+            return false;
+        }
+
+        var offset = 8;
+        while (offset <= png.Length - 12)
+        {
+            var chunkLength = BinaryPrimitives.ReadUInt32BigEndian(png.AsSpan(offset, 4));
+            var remainingLength = png.Length - offset - 12;
+            if (chunkLength > (uint)remainingLength)
+            {
+                return false;
+            }
+
+            var chunkType = png.AsSpan(offset + 4, 4);
+            if (chunkType.SequenceEqual("tRNS"u8))
+            {
+                var transparency = png.AsSpan(offset + 8, (int)chunkLength);
+                return colorType switch
+                {
+                    0 => transparency.Length == 2,
+                    2 => transparency.Length == 6,
+                    3 => ContainsNonOpaquePaletteEntry(transparency),
+                    _ => false
+                };
+            }
+
+            if (chunkType.SequenceEqual("IDAT"u8) || chunkType.SequenceEqual("IEND"u8))
+            {
+                break;
+            }
+
+            offset += (int)chunkLength + 12;
+        }
+
+        return false;
+    }
+
+    private static bool ContainsNonOpaquePaletteEntry(ReadOnlySpan<byte> transparency)
+    {
+        foreach (var alpha in transparency)
+        {
+            if (alpha < byte.MaxValue)
+            {
+                return true;
+            }
+        }
+
+        return false;
+    }
 
     private static bool IsPng(byte[] data) =>
         data.Length > 25 && data.AsSpan(0, 8).SequenceEqual(new byte[] { 137, 80, 78, 71, 13, 10, 26, 10 });
